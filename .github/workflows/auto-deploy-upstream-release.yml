@@ -1,0 +1,157 @@
+# Auto-sync this deployment fork from upstream FlareMo stable releases and deploy.
+# Upstream repository realchendahuang/FlareMo never runs this job.
+# Does not create new Cloudflare resource sets; existing flaremo resources are reused.
+name: Auto deploy upstream release
+
+on:
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag to install, for example v0.3.1. Leave empty for latest."
+        required: false
+        type: string
+      dry_run:
+        description: "Build, wrangler dry-run, and read-only resource check; skip D1 migration, publish, and secret sync"
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: flaremo-auto-deploy
+  cancel-in-progress: false
+
+jobs:
+  auto-deploy:
+    if: github.repository != 'realchendahuang/FlareMo'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: "true"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      BASE_BRANCH: ${{ github.event.repository.default_branch }}
+      GH_TOKEN: ${{ github.token }}
+      REQUESTED_VERSION: ${{ inputs.version }}
+      UPSTREAM_REPOSITORY: realchendahuang/FlareMo
+    steps:
+      - name: Check Cloudflare credentials
+        run: |
+          set -euo pipefail
+          if [[ -z "${CLOUDFLARE_API_TOKEN}" ]]; then
+            echo "Missing repository secret CLOUDFLARE_API_TOKEN." >&2
+            exit 1
+          fi
+          if [[ -z "${CLOUDFLARE_ACCOUNT_ID}" ]]; then
+            echo "Missing repository secret CLOUDFLARE_ACCOUNT_ID." >&2
+            exit 1
+          fi
+
+      - name: Check out deployment repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Sync from upstream FlareMo release
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          target_version="${REQUESTED_VERSION}"
+          if [[ -z "${target_version}" ]]; then
+            target_version="$(gh api "repos/${UPSTREAM_REPOSITORY}/releases/latest" --jq .tag_name)"
+          fi
+          if [[ ! "${target_version}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid FlareMo release tag: ${target_version}" >&2
+            exit 1
+          fi
+
+          current_version="$(node -p "JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version")"
+          if [[ ! "${current_version}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Invalid installed FlareMo version: ${current_version}" >&2
+            exit 1
+          fi
+
+          target_number="${target_version#v}"
+          IFS=. read -r current_major current_minor current_patch <<< "${current_version}"
+          IFS=. read -r target_major target_minor target_patch <<< "${target_number}"
+          if (( target_major < current_major ||
+                (target_major == current_major && target_minor < current_minor) ||
+                (target_major == current_major && target_minor == current_minor && target_patch < current_patch) )); then
+            echo "Refusing to downgrade FlareMo from v${current_version} to ${target_version}." >&2
+            exit 1
+          fi
+          if [[ "${target_number}" == "${current_version}" ]]; then
+            echo "${target_version} is already installed. Continuing to deploy."
+            exit 0
+          fi
+
+          git remote add flaremo-upstream "https://github.com/${UPSTREAM_REPOSITORY}.git"
+          git fetch --no-tags flaremo-upstream \
+            "refs/tags/v${current_version}:refs/tags/v${current_version}" \
+            "refs/tags/${target_version}:refs/tags/${target_version}"
+
+          git config user.name "flaremo-auto-deploy[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch "${BASE_BRANCH}"
+
+          update_patch="$(mktemp)"
+          git diff --binary --full-index \
+            "refs/tags/v${current_version}" \
+            "refs/tags/${target_version}" > "${update_patch}"
+          if ! git apply --3way --index "${update_patch}"; then
+            echo "The deployment repository conflicts with ${target_version}. Resolve the update manually." >&2
+            exit 1
+          fi
+          if git diff --cached --quiet; then
+            echo "No file changes after applying ${target_version}. Continuing to deploy."
+            exit 0
+          fi
+          git commit -m "Update FlareMo from v${current_version} to ${target_version}"
+          git push origin "HEAD:${BASE_BRANCH}"
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Write wrangler.jsonc
+        env:
+          WRANGLER_JSONC: ${{ secrets.WRANGLER_JSONC }}
+          FLAREMO_D1_DATABASE_ID: ${{ secrets.FLAREMO_D1_DATABASE_ID }}
+          FLAREMO_PUBLIC_URL: ${{ vars.FLAREMO_PUBLIC_URL || secrets.FLAREMO_PUBLIC_URL }}
+          FLAREMO_DEPLOY_REPOSITORY: ${{ vars.FLAREMO_DEPLOY_REPOSITORY }}
+        run: node ./scripts/write-wrangler-config.mjs
+
+      - name: Verify Cloudflare resources
+        run: pnpm provision:remote -- --check
+
+      - name: Deploy
+        run: |
+          set -euo pipefail
+          if [[ "${{ inputs.dry_run }}" == "true" ]]; then
+            pnpm deploy:dry-run
+          else
+            pnpm deploy
+          fi
+
+      - name: Sync Worker secrets
+        if: ${{ inputs.dry_run != true }}
+        env:
+          BETTER_AUTH_SECRET: ${{ secrets.BETTER_AUTH_SECRET }}
+          FLAREMO_BOOTSTRAP_SECRET: ${{ secrets.FLAREMO_BOOTSTRAP_SECRET }}
+        run: pnpm secrets:sync
+
+      - name: Smoke check deployed site
+        if: ${{ inputs.dry_run != true }}
+        run: pnpm smoke:check
