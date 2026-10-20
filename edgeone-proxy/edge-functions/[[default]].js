@@ -30,7 +30,7 @@ export default async function onRequest(context) {
   const ORIGIN = `https://${ORIGIN_HOST}`;
   const TEO_VERIFICATION = runtimeEnv(context, 'TEO_VERIFICATION') || 'CHANGE_ME_TEO_VERIFICATION';
 
-  // Serve EO domain ownership verification from env (or ASSETS when present)
+  // Serve EO domain ownership verification from env only (no static asset).
   const verifies = {
     '/.well-known/teo-verification/5fez15h45z.txt': TEO_VERIFICATION,
   };

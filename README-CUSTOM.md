@@ -12,4 +12,4 @@ Secrets / `.env` are **not** stored in this repo.
 Set these in the EdgeOne console (values never belong in git):
 
 - `ORIGIN_HOST` — Cloudflare Worker hostname only (no scheme). Fallback: `CHANGE_ME.workers.dev`.
-- `TEO_VERIFICATION` — body for `/.well-known/teo-verification/5fez15h45z.txt`. Fallback: `CHANGE_ME_TEO_VERIFICATION`.
+- `TEO_VERIFICATION` — body for `/.well-known/teo-verification/5fez15h45z.txt`, served by the edge function only (no static file). Fallback: `CHANGE_ME_TEO_VERIFICATION`.
