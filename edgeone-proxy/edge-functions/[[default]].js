@@ -30,12 +30,10 @@ export default async function onRequest(context) {
   const ORIGIN = `https://${ORIGIN_HOST}`;
   const TEO_VERIFICATION = runtimeEnv(context, 'TEO_VERIFICATION') || 'CHANGE_ME_TEO_VERIFICATION';
 
-  // Serve EO domain ownership verification from env only (no static asset).
-  const verifies = {
-    '/.well-known/teo-verification/5fez15h45z.txt': TEO_VERIFICATION,
-  };
-  if (verifies[inbound.pathname]) {
-    return new Response(verifies[inbound.pathname], {
+  // Serve EO domain ownership verification from env for any Teo txt path.
+  const teoMatch = inbound.pathname.match(/^\/\.well-known\/teo-verification\/[^/]+\.txt$/);
+  if (teoMatch && TEO_VERIFICATION && TEO_VERIFICATION !== 'CHANGE_ME_TEO_VERIFICATION') {
+    return new Response(TEO_VERIFICATION, {
       headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
     });
   }
