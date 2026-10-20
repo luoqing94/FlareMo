@@ -1,10 +1,15 @@
-const ORIGIN_HOST = 'CHANGE_ME.workers.dev';
-const ORIGIN = `https://${ORIGIN_HOST}`;
-
 const HOP = new Set([
   'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
   'te', 'trailers', 'transfer-encoding', 'upgrade', 'host', 'content-length',
 ]);
+
+function runtimeEnv(context, name) {
+  const fromContext = context?.env?.[name];
+  if (fromContext) return String(fromContext);
+  const fromProcess = typeof process !== 'undefined' ? process.env?.[name] : undefined;
+  if (fromProcess) return String(fromProcess);
+  return '';
+}
 
 function shouldNoStore(pathname) {
   if (pathname.startsWith('/api/')) return true;
@@ -20,9 +25,14 @@ export default async function onRequest(context) {
   const { request } = context;
   const inbound = new URL(request.url);
 
-  // Serve EO domain ownership verification from ASSETS when present
+  // EdgeOne injects platform env per request; do not cache these at module load.
+  const ORIGIN_HOST = runtimeEnv(context, 'ORIGIN_HOST') || 'CHANGE_ME.workers.dev';
+  const ORIGIN = `https://${ORIGIN_HOST}`;
+  const TEO_VERIFICATION = runtimeEnv(context, 'TEO_VERIFICATION') || 'CHANGE_ME_TEO_VERIFICATION';
+
+  // Serve EO domain ownership verification from env (or ASSETS when present)
   const verifies = {
-    '/.well-known/teo-verification/5fez15h45z.txt': 'CHANGE_ME_TEO_VERIFICATION',
+    '/.well-known/teo-verification/5fez15h45z.txt': TEO_VERIFICATION,
   };
   if (verifies[inbound.pathname]) {
     return new Response(verifies[inbound.pathname], {
