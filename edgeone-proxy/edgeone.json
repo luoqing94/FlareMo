@@ -1,0 +1,7 @@
+{
+  "name": "flaremo-proxy",
+  "buildCommand": "",
+  "outputDirectory": ".",
+  "installCommand": "",
+  "nodeVersion": "22"
+}
