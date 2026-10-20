@@ -1,4 +1,4 @@
-const ORIGIN_HOST = 'flaremo.lq280657463.workers.dev';
+const ORIGIN_HOST = 'CHANGE_ME.workers.dev';
 const ORIGIN = `https://${ORIGIN_HOST}`;
 
 const HOP = new Set([
@@ -22,7 +22,7 @@ export default async function onRequest(context) {
 
   // Serve EO domain ownership verification from ASSETS when present
   const verifies = {
-    '/.well-known/teo-verification/5fez15h45z.txt': 'xay6dlsb8fx4den0v9aos15d8848eovc',
+    '/.well-known/teo-verification/5fez15h45z.txt': 'CHANGE_ME_TEO_VERIFICATION',
   };
   if (verifies[inbound.pathname]) {
     return new Response(verifies[inbound.pathname], {
