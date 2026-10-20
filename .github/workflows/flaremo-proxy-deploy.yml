@@ -1,0 +1,35 @@
+name: Deploy EdgeOne proxy
+on:
+  push:
+    branches: [custom/live]
+    paths:
+      - 'edgeone-proxy/**'
+      - '.github/workflows/flaremo-proxy-deploy.yml'
+  workflow_dispatch:
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install EdgeOne CLI
+        run: npm i -g edgeone@latest
+      - name: Prepare (no placeholder teo txt)
+        working-directory: edgeone-proxy
+        env:
+          TEO_VERIFICATION: ${{ secrets.TEO_VERIFICATION }}
+        run: |
+          set -euo pipefail
+          find . -path '*/.well-known/teo-verification/*.txt' -delete 2>/dev/null || true
+          if [ -n "${TEO_VERIFICATION:-}" ]; then
+            mkdir -p "public/.well-known/teo-verification"
+            printf '%s' "$TEO_VERIFICATION" > "public/.well-known/teo-verification/${TEO_VERIFICATION}.txt"
+          fi
+      - name: Deploy
+        working-directory: edgeone-proxy
+        env:
+          EDGEONE_API_TOKEN: ${{ secrets.EDGEONE_API_TOKEN }}
+          EDGEONE_PROJECT: ${{ vars.EDGEONE_PROJECT }}
+        run: edgeone makers deploy . -n "$EDGEONE_PROJECT" -t "$EDGEONE_API_TOKEN" -e production
