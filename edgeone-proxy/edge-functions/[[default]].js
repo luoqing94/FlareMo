@@ -462,7 +462,38 @@ async function handleSwrRequest(context, request, url, originHost) {
     }
   }
 
-  // 2. Check L2 Edge Cache API (caches.default)
+  // 2. FM-5: Cold isolate SPA HTML seed -> seed L1 memory cache and return
+  // pre-transformed embedded shell in 0ms without blocking on originHost.
+  if (isSpa) {
+    const cachedAt = Date.now();
+    const embeddedBuffer = EMBEDDED_TRANSFORMED_HTML_BYTES.buffer.slice(
+      EMBEDDED_TRANSFORMED_HTML_BYTES.byteOffset,
+      EMBEDDED_TRANSFORMED_HTML_BYTES.byteOffset +
+        EMBEDDED_TRANSFORMED_HTML_BYTES.byteLength,
+    );
+    const headerPairs = [
+      ["content-type", "text/html; charset=utf-8"],
+      ["x-flaremo-edge", "edgeone-proxy"],
+    ];
+    setMemorySwrEntry(cacheKeyUrl, {
+      body: embeddedBuffer,
+      status: 200,
+      statusText: "OK",
+      headers: headerPairs,
+      cachedAt,
+    });
+    const headers = new Headers(headerPairs);
+    headers.set("cache-control", clientCacheControl);
+    headers.set("x-eo-cache", "HIT-EMBEDDED");
+    headers.set("x-eo-cached-at", String(cachedAt));
+    return new Response(method === "HEAD" ? null : embeddedBuffer.slice(0), {
+      status: 200,
+      statusText: "OK",
+      headers,
+    });
+  }
+
+  // 3. Check L2 Edge Cache API (caches.default) for non-SPA SWR routes
   if (cache) {
     try {
       const cached = await cache.match(cacheKey);
@@ -487,7 +518,7 @@ async function handleSwrRequest(context, request, url, originHost) {
               request,
               url,
               originHost,
-              isSpa,
+              false,
             ),
           );
           return responseFromCachedResponse(
@@ -499,38 +530,8 @@ async function handleSwrRequest(context, request, url, originHost) {
         }
       }
     } catch {
-      // Fall through to embedded HTML seed or upstream fetch.
+      // Fall through to upstream fetch.
     }
-  }
-
-  // 3. FM-5: Cold isolate SPA HTML seed -> return pre-transformed embedded shell in 0ms
-  // and refresh L1/L2 in background via waitUntil.
-  if (isSpa) {
-    safeWaitUntil(
-      context,
-      fetchAndStoreSwr(
-        cacheKeyUrl,
-        cacheKey,
-        upstreamFetchUrl,
-        request,
-        url,
-        originHost,
-        true,
-      ),
-    );
-    const headers = new Headers({
-      "content-type": "text/html; charset=utf-8",
-      "cache-control": clientCacheControl,
-      "x-flaremo-edge": "edgeone-proxy",
-      "x-eo-cache": "HIT-EMBEDDED",
-    });
-    return new Response(
-      method === "HEAD" ? null : EMBEDDED_TRANSFORMED_HTML_BYTES.slice(0),
-      {
-        status: 200,
-        headers,
-      },
-    );
   }
 
   // 4. Non-SPA Cache Miss -> Singleflight Upstream Fetch
