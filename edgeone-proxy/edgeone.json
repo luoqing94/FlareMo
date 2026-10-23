@@ -1,7 +1,123 @@
 {
   "name": "flaremo-proxy",
-  "buildCommand": "",
-  "outputDirectory": ".",
-  "installCommand": "",
-  "nodeVersion": "22"
+  "installCommand": "if [ -d public/.well-known ]; then mkdir -p .well-known && cp -a public/.well-known/. .well-known/; fi && rm -rf public index.html",
+  "headers": [
+    {
+      "source": "/assets/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=31536000,immutable"
+        }
+      ]
+    },
+    {
+      "source": "/brand/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/brand/amber/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/brand/crimson/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/brand/indigo/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/brand/iris/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/brand/jade/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/brand/ocean/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/brand/teal/*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/site.webmanifest",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/robots.txt",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/offline.html",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=86400"
+        }
+      ]
+    },
+    {
+      "source": "/sw.js",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "public,max-age=0,must-revalidate"
+        }
+      ]
+    }
+  ]
 }
