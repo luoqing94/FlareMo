@@ -54,15 +54,21 @@ export type RichComposerEditorProps = {
   /**
    * The in-progress "#tag" under the caret, if any. `from` is the ProseMirror
    * position of the leading "#", so the caller can replace the run with a
-   * picked tag. Emitted once per token change (including → null).
+   * picked tag. Emitted once per token change (including → null). `meta`
+   * tells the caller whether the document changed so a dismissed panel can
+   * reopen on a selection-only return into the same token.
    */
-  onTagTokenChange?: (token: { from: number; text: string } | null) => void;
+  onTagTokenChange?: (
+    token: { from: number; text: string } | null,
+    meta?: { docChanged: boolean; pointerId?: number },
+  ) => void;
   /**
    * The in-progress "[[" under the caret, if any. `from` is the ProseMirror
    * position of the leading "[[".
    */
   onWikiLinkTokenChange?: (
     token: { from: number; query: string } | null,
+    meta?: { docChanged: boolean; pointerId?: number },
   ) => void;
   /**
    * When on (composer behavior) Shift+Enter submits the note — Enter is the
@@ -240,9 +246,10 @@ export function RichComposerEditor({
       lastEmittedRef.current = markdown;
       onContentChangeRef.current(markdown);
     },
-    onTransaction: ({ editor: current }) => {
+    onTransaction: ({ editor: current, transaction }) => {
       const { state } = current.view;
       const { $from } = state.selection;
+      const meta = { docChanged: transaction.docChanged };
 
       if (onTagTokenChangeRef.current) {
         let token: { from: number; text: string } | null = null;
@@ -261,7 +268,7 @@ export function RichComposerEditor({
         const key = token ? `${token.from}:${token.text}` : null;
         if (key !== lastTagTokenRef.current) {
           lastTagTokenRef.current = key;
-          onTagTokenChangeRef.current(token);
+          onTagTokenChangeRef.current(token, meta);
         }
       }
 
@@ -285,7 +292,7 @@ export function RichComposerEditor({
         const key = wikiToken ? `${wikiToken.from}:${wikiToken.query}` : null;
         if (key !== lastWikiTokenRef.current) {
           lastWikiTokenRef.current = key;
-          onWikiLinkTokenChangeRef.current(wikiToken);
+          onWikiLinkTokenChangeRef.current(wikiToken, meta);
         }
       }
 
@@ -299,6 +306,67 @@ export function RichComposerEditor({
       editorRef.current = null;
     };
   }, [editor, editorRef]);
+
+  // Clicking back into a dismissed "#tag" / "[[" must reopen even when the
+  // token key did not change (caret already inside). Force a selection-only
+  // notify after the browser updates the selection.
+  useEffect(() => {
+    if (!editor) return;
+    const emitTokens = (pointerId?: number) => {
+      const { state } = editor.view;
+      const { $from } = state.selection;
+      const meta = { docChanged: false, pointerId };
+
+      if (onTagTokenChangeRef.current) {
+        let token: { from: number; text: string } | null = null;
+        if ($from.parent.inlineContent && $from.parentOffset > 0) {
+          const before = $from.parent.textBetween(
+            0,
+            $from.parentOffset,
+            undefined,
+            "\ufffc",
+          );
+          const active = extractActiveTagToken(before, before.length);
+          if (active) {
+            token = { from: $from.start() + active.start, text: active.token };
+          }
+        }
+        lastTagTokenRef.current = token ? `${token.from}:${token.text}` : null;
+        onTagTokenChangeRef.current(token, meta);
+      }
+
+      if (onWikiLinkTokenChangeRef.current) {
+        let wikiToken: { from: number; query: string } | null = null;
+        if ($from.parent.inlineContent && $from.parentOffset >= 2) {
+          const before = $from.parent.textBetween(
+            0,
+            $from.parentOffset,
+            undefined,
+            "\ufffc",
+          );
+          const active = extractActiveWikiLinkToken(before, before.length);
+          if (active) {
+            wikiToken = {
+              from: $from.start() + active.start,
+              query: active.query,
+            };
+          }
+        }
+        lastWikiTokenRef.current = wikiToken
+          ? `${wikiToken.from}:${wikiToken.query}`
+          : null;
+        onWikiLinkTokenChangeRef.current(wikiToken, meta);
+      }
+    };
+
+    const onPointerDown = (event: PointerEvent) => {
+      requestAnimationFrame(() => emitTokens(event.pointerId));
+    };
+    editor.view.dom.addEventListener("pointerdown", onPointerDown);
+    return () => {
+      editor.view.dom.removeEventListener("pointerdown", onPointerDown);
+    };
+  }, [editor]);
 
   useEffect(() => {
     if (editor) editor.setEditable(!disabled);

@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Editor } from "@tiptap/react";
-import { type RefObject, useState } from "react";
+import { type RefObject, useCallback, useRef, useState } from "react";
 import { listMemos, type Memo } from "@/api";
+import {
+  nextSuggestionDismissFrom,
+  type SuggestionDismissMeta,
+  shouldShowComposerSuggestions,
+} from "@/lib/suggestion-dismiss-session";
 import {
   filterTagSuggestions,
   type TagSuggestion,
@@ -16,15 +21,23 @@ type UseComposerSuggestionsOptions = {
 
 export type UseComposerSuggestionsResult = {
   /** Token under the caret, fed straight back into the editor prop. */
-  setActiveTagToken: (token: { from: number; text: string } | null) => void;
+  setActiveTagToken: (
+    token: { from: number; text: string } | null,
+    meta?: SuggestionDismissMeta,
+  ) => void;
   /** Token under the caret, fed straight back into the editor prop. */
-  setActiveWikiToken: (token: { from: number; query: string } | null) => void;
+  setActiveWikiToken: (
+    token: { from: number; query: string } | null,
+    meta?: SuggestionDismissMeta,
+  ) => void;
   tagSuggestions: TagSuggestion[];
   showTagSuggestions: boolean;
   acceptTagSuggestion: (name: string) => void;
+  dismissTagSuggestions: (pointerId?: number) => void;
   wikiSuggestions: Memo[];
   showWikiSuggestions: boolean;
   acceptWikiSuggestion: (targetMemo: Memo) => void;
+  dismissWikiSuggestions: (pointerId?: number) => void;
 };
 
 /**
@@ -40,15 +53,61 @@ export function useComposerSuggestions({
 }: UseComposerSuggestionsOptions): UseComposerSuggestionsResult {
   // "#" autocomplete: the in-progress tag token under the caret (reported by
   // the editor's transactions) plus the highlighted row.
-  const [activeTagToken, setActiveTagToken] = useState<{
+  const [activeTagToken, setActiveTagTokenState] = useState<{
     from: number;
     text: string;
   } | null>(null);
   // "[[" autocomplete: in-progress wikilink token under the caret
-  const [activeWikiToken, setActiveWikiToken] = useState<{
+  const [activeWikiToken, setActiveWikiTokenState] = useState<{
     from: number;
     query: string;
   } | null>(null);
+  const [tagDismissedFrom, setTagDismissedFrom] = useState<number | null>(null);
+  const [wikiDismissedFrom, setWikiDismissedFrom] = useState<number | null>(
+    null,
+  );
+  const suppressReopenPointerIdsRef = useRef<Set<number>>(new Set());
+
+  const setActiveTagToken = useCallback(
+    (
+      token: { from: number; text: string } | null,
+      meta?: SuggestionDismissMeta,
+    ) => {
+      setActiveTagTokenState(token);
+      setTagDismissedFrom((prev) => {
+        if (
+          meta?.pointerId != null &&
+          suppressReopenPointerIdsRef.current.has(meta.pointerId)
+        ) {
+          suppressReopenPointerIdsRef.current.delete(meta.pointerId);
+          // Same gesture that dismissed: keep dismissed while still in-session.
+          if (token && prev === token.from) return prev;
+        }
+        return nextSuggestionDismissFrom(prev, token?.from ?? null, meta);
+      });
+    },
+    [],
+  );
+
+  const setActiveWikiToken = useCallback(
+    (
+      token: { from: number; query: string } | null,
+      meta?: SuggestionDismissMeta,
+    ) => {
+      setActiveWikiTokenState(token);
+      setWikiDismissedFrom((prev) => {
+        if (
+          meta?.pointerId != null &&
+          suppressReopenPointerIdsRef.current.has(meta.pointerId)
+        ) {
+          suppressReopenPointerIdsRef.current.delete(meta.pointerId);
+          if (token && prev === token.from) return prev;
+        }
+        return nextSuggestionDismissFrom(prev, token?.from ?? null, meta);
+      });
+    },
+    [],
+  );
 
   const wikiSuggestionsQuery = useQuery({
     queryKey: ["composer-wiki-suggestions", activeWikiToken?.query],
@@ -65,7 +124,12 @@ export function useComposerSuggestions({
     tags && activeTagToken
       ? filterTagSuggestions(tags, activeTagToken.text)
       : [];
-  const showTagSuggestions = tagSuggestions.length > 0 && !isPending;
+  const showTagSuggestions = shouldShowComposerSuggestions({
+    hasSuggestions: tagSuggestions.length > 0,
+    isPending,
+    tokenFrom: activeTagToken?.from ?? null,
+    dismissedFrom: tagDismissedFrom,
+  });
 
   const acceptTagSuggestion = (name: string) => {
     if (!activeTagToken) return;
@@ -80,11 +144,25 @@ export function useComposerSuggestions({
         { type: "text", text: `#${name} ` },
       )
       .run();
+    setTagDismissedFrom(null);
+  };
+
+  const dismissTagSuggestions = (pointerId?: number) => {
+    if (activeTagToken) {
+      setTagDismissedFrom(activeTagToken.from);
+    }
+    if (typeof pointerId === "number") {
+      suppressReopenPointerIdsRef.current.add(pointerId);
+    }
   };
 
   const wikiSuggestions = wikiSuggestionsQuery.data?.memos ?? [];
-  const showWikiSuggestions =
-    Boolean(activeWikiToken) && wikiSuggestions.length > 0 && !isPending;
+  const showWikiSuggestions = shouldShowComposerSuggestions({
+    hasSuggestions: wikiSuggestions.length > 0,
+    isPending,
+    tokenFrom: activeWikiToken?.from ?? null,
+    dismissedFrom: wikiDismissedFrom,
+  });
 
   const acceptWikiSuggestion = (targetMemo: Memo) => {
     if (!activeWikiToken) return;
@@ -106,7 +184,17 @@ export function useComposerSuggestions({
         { type: "text", text: linkText },
       )
       .run();
-    setActiveWikiToken(null);
+    setActiveWikiTokenState(null);
+    setWikiDismissedFrom(null);
+  };
+
+  const dismissWikiSuggestions = (pointerId?: number) => {
+    if (activeWikiToken) {
+      setWikiDismissedFrom(activeWikiToken.from);
+    }
+    if (typeof pointerId === "number") {
+      suppressReopenPointerIdsRef.current.add(pointerId);
+    }
   };
 
   return {
@@ -115,8 +203,10 @@ export function useComposerSuggestions({
     tagSuggestions,
     showTagSuggestions,
     acceptTagSuggestion,
+    dismissTagSuggestions,
     wikiSuggestions,
     showWikiSuggestions,
     acceptWikiSuggestion,
+    dismissWikiSuggestions,
   };
 }
