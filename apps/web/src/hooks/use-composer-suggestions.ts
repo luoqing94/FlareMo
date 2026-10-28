@@ -34,10 +34,14 @@ export type UseComposerSuggestionsResult = {
   showTagSuggestions: boolean;
   acceptTagSuggestion: (name: string) => void;
   dismissTagSuggestions: (pointerId?: number) => void;
+  /** Document pos of the active "#" token start, for caret-anchored placement. */
+  tagAnchorPos: number | null;
   wikiSuggestions: Memo[];
   showWikiSuggestions: boolean;
   acceptWikiSuggestion: (targetMemo: Memo) => void;
   dismissWikiSuggestions: (pointerId?: number) => void;
+  /** Document pos of the active "[[" token start, for caret-anchored placement. */
+  wikiAnchorPos: number | null;
 };
 
 /**
@@ -204,9 +208,11 @@ export function useComposerSuggestions({
     showTagSuggestions,
     acceptTagSuggestion,
     dismissTagSuggestions,
+    tagAnchorPos: activeTagToken?.from ?? null,
     wikiSuggestions,
     showWikiSuggestions,
     acceptWikiSuggestion,
     dismissWikiSuggestions,
+    wikiAnchorPos: activeWikiToken?.from ?? null,
   };
 }

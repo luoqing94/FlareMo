@@ -114,10 +114,12 @@ export function MemoComposer({
     showTagSuggestions,
     acceptTagSuggestion,
     dismissTagSuggestions,
+    tagAnchorPos,
     wikiSuggestions,
     showWikiSuggestions,
     acceptWikiSuggestion,
     dismissWikiSuggestions,
+    wikiAnchorPos,
   } = useComposerSuggestions({ editorRef, isPending, tags });
 
   const { capture, captureController, voiceActive, now } = useComposerVoice({
@@ -189,12 +191,16 @@ export function MemoComposer({
         suggestions={tagSuggestions}
         onAccept={acceptTagSuggestion}
         onDismiss={(event) => dismissTagSuggestions(event.pointerId)}
+        editorRef={editorRef}
+        anchorPos={tagAnchorPos}
       />
       <ComposerWikiSuggestions
         visible={showWikiSuggestions}
         suggestions={wikiSuggestions}
         onAccept={acceptWikiSuggestion}
         onDismiss={(event) => dismissWikiSuggestions(event.pointerId)}
+        editorRef={editorRef}
+        anchorPos={wikiAnchorPos}
       />
       <ComposerFileChips
         files={draft.files}

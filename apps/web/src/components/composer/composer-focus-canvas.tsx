@@ -139,10 +139,12 @@ export function ComposerFocusCanvas({
     showTagSuggestions,
     acceptTagSuggestion,
     dismissTagSuggestions,
+    tagAnchorPos,
     wikiSuggestions,
     showWikiSuggestions,
     acceptWikiSuggestion,
     dismissWikiSuggestions,
+    wikiAnchorPos,
   } = useComposerSuggestions({ editorRef: canvasEditorRef, isPending, tags });
 
   const { capture, captureController, voiceActive, now } = useComposerVoice({
@@ -305,12 +307,16 @@ export function ComposerFocusCanvas({
                   suggestions={tagSuggestions}
                   onAccept={acceptTagSuggestion}
                   onDismiss={(event) => dismissTagSuggestions(event.pointerId)}
+                  editorRef={canvasEditorRef}
+                  anchorPos={tagAnchorPos}
                 />
                 <ComposerWikiSuggestions
                   visible={showWikiSuggestions}
                   suggestions={wikiSuggestions}
                   onAccept={acceptWikiSuggestion}
                   onDismiss={(event) => dismissWikiSuggestions(event.pointerId)}
+                  editorRef={canvasEditorRef}
+                  anchorPos={wikiAnchorPos}
                 />
                 <ComposerFileChips
                   files={draft.files}
