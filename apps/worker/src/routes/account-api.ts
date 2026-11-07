@@ -1,4 +1,10 @@
 import {
+  MAX_MEMOS_PAT_EXPIRES_IN_DAYS,
+  MEMOS_PAT_SCOPES,
+  type MemosPatScope,
+  memosPatScopesFromPermissions,
+} from "@flaremo/contracts";
+import {
   beginFlaremoMemberRemoval,
   ConflictError,
   createMemberRemovalJob,
@@ -14,7 +20,6 @@ import {
   updateMemberRemovalJob,
   ValidationError,
 } from "@flaremo/domain";
-import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
 import { z } from "zod";
 import { cleanupFlaremoArtifacts } from "../artifact-cleanup";
@@ -29,12 +34,23 @@ import {
   sendEmailChangeVerificationEmail,
 } from "../email";
 import { jsonError } from "../http";
+import { createMemosPersonalAccessToken } from "../memos-compat/pat";
+import { zValidator } from "../validated";
 
 export const accountApi = new Hono<HonoBindings>();
 
 const createPersonalAccessTokenSchema = z.object({
   name: z.string().trim().min(1).max(32),
-  expires_in_days: z.number().int().min(1).max(365).nullable().optional(),
+  // null stays accepted for older clients; it now means "the default lifetime"
+  // instead of "never expires".
+  expires_in_days: z
+    .number()
+    .int()
+    .min(1)
+    .max(MAX_MEMOS_PAT_EXPIRES_IN_DAYS)
+    .nullable()
+    .optional(),
+  scopes: z.array(z.enum(MEMOS_PAT_SCOPES)).min(1).max(2).optional(),
 });
 
 const changeEmailSchema = z.object({
@@ -70,15 +86,11 @@ accountApi.post(
       const input = c.req.valid("json");
       const { createFlareMoAuth } = await loadAuthFactory();
       const auth = createFlareMoAuth(c.env, context.db);
-      const created = await auth.api.createApiKey({
-        body: {
-          configId: MEMOS_PAT_CONFIG_ID,
-          userId: context.authUserId,
-          name: input.name,
-          expiresIn: input.expires_in_days
-            ? input.expires_in_days * 24 * 60 * 60
-            : null,
-        },
+      const created = await createMemosPersonalAccessToken(auth, {
+        userId: context.authUserId,
+        name: input.name,
+        expiresInDays: input.expires_in_days,
+        scopes: input.scopes,
       });
       const response = c.json(
         {
@@ -295,6 +307,7 @@ function toPersonalAccessTokenDto(token: {
   rateLimitEnabled: boolean;
   rateLimitMax: number | null;
   rateLimitTimeWindow: number | null;
+  permissions: unknown;
 }) {
   return {
     id: token.id,
@@ -307,6 +320,11 @@ function toPersonalAccessTokenDto(token: {
     updated_at: token.updatedAt.toISOString(),
     last_request: toIsoDate(token.lastRequest),
     request_count: token.requestCount,
+    // Legacy tokens stored no permissions and keep full access.
+    scopes:
+      memosPatScopesFromPermissions(
+        parseStoredPermissions(token.permissions),
+      ) ?? (["notes", "admin"] satisfies MemosPatScope[]),
     rate_limit_enabled: token.rateLimitEnabled,
     rate_limit_max: token.rateLimitMax,
     rate_limit_time_window: token.rateLimitTimeWindow,
@@ -315,4 +333,19 @@ function toPersonalAccessTokenDto(token: {
 
 function toIsoDate(value: Date | null): string | null {
   return value ? value.toISOString() : null;
+}
+
+/**
+ * Permission statements live in D1 as a JSON string, but the plugin's own
+ * create/update/verify responses already hand back the parsed object. Accept
+ * both so the DTO reports the same scopes either way.
+ */
+function parseStoredPermissions(value: unknown): unknown {
+  if (typeof value !== "string") return value ?? null;
+  if (!value) return null;
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
 }
