@@ -13,6 +13,7 @@ import {
   or,
   sql,
 } from "drizzle-orm";
+import { chunkForD1, d1IdsPerStatement } from "./d1-limits";
 import { ValidationError } from "./errors";
 import { parseResourceName } from "./ids";
 import { getMemoById, getMemoByIdForViewer } from "./memos";
@@ -63,6 +64,7 @@ export async function listAttachments(
   user: UserRow,
   input: ListAttachmentsInput = {},
 ) {
+  const pageSize = normalizeAttachmentPageSize(input.pageSize);
   const filters = [
     isNull(attachments.deletedAt),
     eq(attachments.state, "ready"),
@@ -80,7 +82,7 @@ export async function listAttachments(
     .from(attachments)
     .where(and(...filters))
     .orderBy(desc(attachments.createdAt))
-    .limit(input.pageSize ?? 50);
+    .limit(pageSize);
 }
 
 /**
@@ -335,17 +337,17 @@ export async function markMemoAttachmentsDeleting(
   const rows = await listAllMemoAttachments(db, user, memoId);
   if (rows.length === 0) return rows;
   const now = new Date().toISOString();
-  await db
-    .update(attachments)
-    .set({ state: "deleting", updatedAt: now })
-    .where(
-      and(
-        inArray(
-          attachments.id,
-          rows.map((attachment) => attachment.id),
-        ),
-      ),
-    );
+  // A memo with more than 100 attachments would otherwise bind past the cap
+  // and leave the delete half-applied.
+  for (const idChunk of chunkForD1(
+    rows.map((attachment) => attachment.id),
+    d1IdsPerStatement(),
+  )) {
+    await db
+      .update(attachments)
+      .set({ state: "deleting", updatedAt: now })
+      .where(inArray(attachments.id, idChunk));
+  }
   return rows;
 }
 
@@ -364,21 +366,32 @@ export async function listAttachmentsForMemosForViewer(
 ) {
   if (memoIds.length === 0) return [];
 
-  const allowedMemoIds = db
-    .select({ id: memos.id })
-    .from(memos)
-    .where(and(memoReadScope(user), inArray(memos.id, memoIds)));
-  return db
-    .select()
-    .from(attachments)
-    .where(
-      and(
-        inArray(attachments.memoId, allowedMemoIds),
-        isNull(attachments.deletedAt),
-        eq(attachments.state, "ready"),
-      ),
-    )
-    .orderBy(desc(attachments.createdAt));
+  // Connect/Social lists hydrate attachments for a whole page at once. The
+  // scalar subquery binds one parameter per memo id, so an unbounded page blew
+  // the 100-parameter cap; chunking keeps every statement legal and the merge
+  // preserves the single-query ordering.
+  const rows: Array<typeof attachments.$inferSelect> = [];
+  for (const idChunk of chunkForD1(memoIds, d1IdsPerStatement(12))) {
+    const allowedMemoIds = db
+      .select({ id: memos.id })
+      .from(memos)
+      .where(and(memoReadScope(user), inArray(memos.id, idChunk)));
+    rows.push(
+      ...(await db
+        .select()
+        .from(attachments)
+        .where(
+          and(
+            inArray(attachments.memoId, allowedMemoIds),
+            isNull(attachments.deletedAt),
+            eq(attachments.state, "ready"),
+          ),
+        )
+        .orderBy(desc(attachments.createdAt))),
+    );
+  }
+  rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return rows;
 }
 
 function normalizeAttachmentPageSize(value: number | undefined) {
